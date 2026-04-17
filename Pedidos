@@ -1,0 +1,734 @@
+import { useState, useEffect, useRef } from "react";
+
+// ── Paleta & estilos globales ──────────────────────────────────────────────
+const G = {
+  bg: "#0f0f0f",
+  panel: "#1a1a1a",
+  card: "#222222",
+  border: "#2e2e2e",
+  accent: "#25D366",   // verde WhatsApp
+  accentDim: "#1aab50",
+  amber: "#f59e0b",
+  red: "#ef4444",
+  blue: "#3b82f6",
+  text: "#e8e8e8",
+  muted: "#7a7a7a",
+  font: "'DM Mono', 'Courier New', monospace",
+  fontSans: "'DM Sans', 'Segoe UI', sans-serif",
+};
+
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: ${G.bg}; color: ${G.text}; font-family: ${G.fontSans}; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: ${G.bg}; }
+  ::-webkit-scrollbar-thumb { background: ${G.border}; border-radius: 3px; }
+  input, select, textarea {
+    background: ${G.bg}; color: ${G.text}; border: 1px solid ${G.border};
+    border-radius: 6px; padding: 8px 12px; font-family: ${G.fontSans};
+    font-size: 13px; outline: none; transition: border .2s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: ${G.accent}; }
+  button { cursor: pointer; font-family: ${G.fontSans}; }
+  .tag-nuevo  { background:#25D36622; color:${G.accent}; }
+  .tag-proceso{ background:#f59e0b22; color:${G.amber}; }
+  .tag-listo  { background:#3b82f622; color:${G.blue}; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  @keyframes slideIn { from{transform:translateY(8px);opacity:0} to{transform:translateY(0);opacity:1} }
+  .slide-in { animation: slideIn .25s ease forwards; }
+`;
+
+// ── Datos de ejemplo ───────────────────────────────────────────────────────
+const INIT_PEDIDOS = [
+  { id:"P001", cliente:"Valentina Torres", telefono:"+57 300 123 4567", items:[{prod:"Torta de chocolate",cant:1,precio:85000},{prod:"Cupcakes x6",cant:2,precio:42000}], total:169000, estado:"nuevo", fecha:"2026-04-17", hora:"09:15", nota:"Sin azúcar en los cupcakes", despacho:"2026-04-18" },
+  { id:"P002", cliente:"Andrés Morales", telefono:"+57 311 987 6543", items:[{prod:"Pan artesanal",cant:4,precio:12000}], total:48000, estado:"proceso", fecha:"2026-04-17", hora:"10:30", nota:"", despacho:"2026-04-17" },
+  { id:"P003", cliente:"Laura Jiménez", telefono:"+57 321 555 0011", items:[{prod:"Galletas x12",cant:3,precio:35000},{prod:"Brownie",cant:2,precio:18000}], total:141000, estado:"listo", fecha:"2026-04-16", hora:"14:00", nota:"Entregar en oficina", despacho:"2026-04-17" },
+  { id:"P004", cliente:"Carlos Ríos", telefono:"+57 300 444 2233", items:[{prod:"Torta de frutas",cant:1,precio:95000}], total:95000, estado:"nuevo", fecha:"2026-04-17", hora:"11:45", nota:"Para cumpleaños, con mensaje", despacho:"2026-04-19" },
+];
+
+const INIT_INVENTARIO = [
+  { id:"M001", nombre:"Harina de trigo",  categoria:"Insumo",    stock:25,  unidad:"kg",   minimo:5,  precio:3200 },
+  { id:"M002", nombre:"Azúcar blanca",    categoria:"Insumo",    stock:18,  unidad:"kg",   minimo:3,  precio:2800 },
+  { id:"M003", nombre:"Mantequilla",      categoria:"Insumo",    stock:8,   unidad:"kg",   minimo:2,  precio:18000 },
+  { id:"M004", nombre:"Huevos",           categoria:"Insumo",    stock:60,  unidad:"und",  minimo:12, precio:600 },
+  { id:"M005", nombre:"Torta de chocolate",categoria:"Producto",  stock:4,   unidad:"und",  minimo:1,  precio:85000 },
+  { id:"M006", nombre:"Cupcakes x6",      categoria:"Producto",  stock:8,   unidad:"caja", minimo:2,  precio:42000 },
+  { id:"M007", nombre:"Pan artesanal",    categoria:"Producto",  stock:15,  unidad:"und",  minimo:5,  precio:12000 },
+  { id:"M008", nombre:"Galletas x12",     categoria:"Producto",  stock:6,   unidad:"caja", minimo:2,  precio:35000 },
+  { id:"M009", nombre:"Brownie",          categoria:"Producto",  stock:10,  unidad:"und",  minimo:3,  precio:18000 },
+  { id:"M010", nombre:"Torta de frutas",  categoria:"Producto",  stock:3,   unidad:"und",  minimo:1,  precio:95000 },
+];
+
+const INIT_EVENTOS = [
+  { id:"E001", titulo:"Despacho P002 - Andrés",   fecha:"2026-04-17", tipo:"despacho", pedidoId:"P002" },
+  { id:"E002", titulo:"Despacho P003 - Laura",    fecha:"2026-04-17", tipo:"despacho", pedidoId:"P003" },
+  { id:"E003", titulo:"Despacho P001 - Valentina",fecha:"2026-04-18", tipo:"despacho", pedidoId:"P001" },
+  { id:"E004", titulo:"Preparar torta de frutas", fecha:"2026-04-18", tipo:"produccion", pedidoId:null },
+  { id:"E005", titulo:"Despacho P004 - Carlos",   fecha:"2026-04-19", tipo:"despacho", pedidoId:"P004" },
+];
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+const fmt = n => new Intl.NumberFormat("es-CO",{style:"currency",currency:"COP",maximumFractionDigits:0}).format(n);
+const today = () => new Date().toISOString().split("T")[0];
+
+function toCSV(pedidos) {
+  const rows = [["ID","Cliente","Teléfono","Productos","Total","Estado","Fecha","Hora","Nota","Despacho"]];
+  pedidos.forEach(p => rows.push([
+    p.id, p.cliente, p.telefono,
+    p.items.map(i=>`${i.prod} x${i.cant}`).join(" | "),
+    p.total, p.estado, p.fecha, p.hora, p.nota, p.despacho
+  ]));
+  return rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+}
+
+function downloadCSV(content, name) {
+  const a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8,\uFEFF" + encodeURIComponent(content);
+  a.download = name;
+  a.click();
+}
+
+// ── Componentes base ───────────────────────────────────────────────────────
+const Btn = ({children, onClick, variant="primary", size="md", style:s={}}) => {
+  const base = {
+    border:"none", borderRadius:"6px", fontWeight:500, transition:"all .15s",
+    display:"inline-flex", alignItems:"center", gap:"6px",
+    padding: size==="sm" ? "5px 10px" : size==="lg" ? "11px 22px" : "8px 16px",
+    fontSize: size==="sm" ? "12px" : "13px",
+  };
+  const vars = {
+    primary:  { background:G.accent, color:"#000" },
+    secondary:{ background:G.card, color:G.text, border:`1px solid ${G.border}` },
+    danger:   { background:"#ef444420", color:G.red, border:`1px solid #ef444440` },
+    amber:    { background:"#f59e0b20", color:G.amber, border:`1px solid #f59e0b40` },
+    ghost:    { background:"transparent", color:G.muted },
+  };
+  return <button onClick={onClick} style={{...base,...vars[variant],...s}}>{children}</button>;
+};
+
+const Badge = ({status}) => {
+  const map = { nuevo:["Nuevo",G.accent,"#25D36622"], proceso:["En proceso",G.amber,"#f59e0b22"], listo:["Listo","#60a5fa","#3b82f622"] };
+  const [label,color,bg] = map[status]||[status,G.muted,G.border+"33"];
+  return <span style={{fontSize:"11px",fontWeight:600,padding:"3px 9px",borderRadius:"20px",background:bg,color,letterSpacing:".4px",textTransform:"uppercase"}}>{label}</span>;
+};
+
+const Modal = ({children, onClose, title, width=480}) => (
+  <div style={{position:"fixed",inset:0,background:"#000a",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="slide-in" style={{background:G.panel,border:`1px solid ${G.border}`,borderRadius:"12px",width,maxWidth:"95vw",maxHeight:"90vh",overflow:"auto"}}>
+      <div style={{padding:"18px 20px",borderBottom:`1px solid ${G.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontWeight:600,fontSize:"15px"}}>{title}</span>
+        <Btn variant="ghost" onClick={onClose} size="sm">✕</Btn>
+      </div>
+      <div style={{padding:"20px"}}>{children}</div>
+    </div>
+  </div>
+);
+
+// ── SECCIÓN PEDIDOS ────────────────────────────────────────────────────────
+function SeccionPedidos({pedidos,setPedidos,setEventos}) {
+  const [tab,setTab] = useState("nuevo");
+  const [modal,setModal] = useState(null);
+  const [form,setForm] = useState(null);
+  const [filtro,setFiltro] = useState("");
+
+  const tabs = [["nuevo","Nuevos 🟢"],["proceso","En Proceso 🟡"],["listo","Listos ✅"]];
+  const counts = {nuevo:0,proceso:0,listo:0};
+  pedidos.forEach(p=>counts[p.estado]++);
+
+  const filtered = pedidos.filter(p=>p.estado===tab && (
+    !filtro || p.cliente.toLowerCase().includes(filtro.toLowerCase()) ||
+    p.id.toLowerCase().includes(filtro.toLowerCase()) ||
+    p.telefono.includes(filtro)
+  ));
+
+  const avanzar = (p) => {
+    const next = p.estado==="nuevo"?"proceso":p.estado==="proceso"?"listo":null;
+    if(!next) return;
+    setPedidos(ps=>ps.map(x=>x.id===p.id?{...x,estado:next}:x));
+  };
+
+  const eliminar = (id) => setPedidos(ps=>ps.filter(p=>p.id!==id));
+
+  const guardarPedido = (data) => {
+    if(data.id && pedidos.find(p=>p.id===data.id)) {
+      setPedidos(ps=>ps.map(p=>p.id===data.id?data:p));
+    } else {
+      const newId = "P" + String(pedidos.length+1).padStart(3,"0");
+      const nuevo = {...data, id:newId, estado:"nuevo", fecha:today()};
+      setPedidos(ps=>[nuevo,...ps]);
+      if(nuevo.despacho) {
+        setEventos(evs=>[...evs,{id:"E"+Date.now(),titulo:`Despacho ${newId} - ${nuevo.cliente}`,fecha:nuevo.despacho,tipo:"despacho",pedidoId:newId}]);
+      }
+    }
+    setForm(null);
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"20px",flexWrap:"wrap",gap:"10px"}}>
+        <div>
+          <h2 style={{fontSize:"20px",fontWeight:700}}>📦 Pedidos</h2>
+          <p style={{color:G.muted,fontSize:"13px",marginTop:"2px"}}>{pedidos.length} pedidos totales</p>
+        </div>
+        <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+          <input placeholder="🔍 Buscar pedido…" value={filtro} onChange={e=>setFiltro(e.target.value)} style={{width:"200px"}}/>
+          <Btn onClick={()=>setForm({cliente:"",telefono:"",items:[{prod:"",cant:1,precio:0}],nota:"",despacho:today()})}>＋ Nuevo pedido</Btn>
+          <Btn variant="secondary" onClick={()=>downloadCSV(toCSV(pedidos.filter(p=>p.estado===tab)),`pedidos-${tab}.csv`)}>⬇ Exportar Excel</Btn>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:"flex",gap:"6px",marginBottom:"16px"}}>
+        {tabs.map(([key,label])=>(
+          <button key={key} onClick={()=>setTab(key)} style={{
+            padding:"8px 18px",borderRadius:"8px",border:`1px solid`,fontSize:"13px",fontWeight:500,transition:"all .15s",
+            borderColor: tab===key ? G.accent : G.border,
+            background: tab===key ? G.accent+"20" : G.card,
+            color: tab===key ? G.accent : G.muted,
+          }}>{label} <span style={{marginLeft:"4px",background:G.border,padding:"1px 7px",borderRadius:"10px",fontSize:"11px"}}>{counts[key]}</span></button>
+        ))}
+      </div>
+
+      {/* Lista */}
+      <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+        {filtered.length===0 && <div style={{textAlign:"center",padding:"60px",color:G.muted,border:`1px dashed ${G.border}`,borderRadius:"10px"}}>Sin pedidos en esta sección</div>}
+        {filtered.map(p=>(
+          <div key={p.id} className="slide-in" style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",padding:"16px",display:"grid",gridTemplateColumns:"1fr auto",gap:"12px",alignItems:"start"}}>
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"8px",flexWrap:"wrap"}}>
+                <span style={{fontFamily:G.font,fontSize:"12px",color:G.muted}}>{p.id}</span>
+                <span style={{fontWeight:600,fontSize:"15px"}}>{p.cliente}</span>
+                <Badge status={p.estado}/>
+                <span style={{fontSize:"12px",color:G.muted,marginLeft:"auto"}}>{p.fecha} {p.hora}</span>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom:"8px"}}>
+                {p.items.map((it,i)=>(
+                  <span key={i} style={{background:G.bg,border:`1px solid ${G.border}`,borderRadius:"5px",padding:"3px 9px",fontSize:"12px"}}>
+                    {it.prod} ×{it.cant} — {fmt(it.precio*it.cant)}
+                  </span>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:"16px",fontSize:"12px",color:G.muted,flexWrap:"wrap"}}>
+                <span>📱 {p.telefono}</span>
+                {p.despacho && <span>🚚 Despacho: <strong style={{color:G.text}}>{p.despacho}</strong></span>}
+                {p.nota && <span>📝 {p.nota}</span>}
+                <span style={{marginLeft:"auto",color:G.accent,fontWeight:700,fontSize:"14px"}}>{fmt(p.total)}</span>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:"6px",flexDirection:"column"}}>
+              {p.estado!=="listo" && <Btn size="sm" variant="amber" onClick={()=>avanzar(p)}>{p.estado==="nuevo"?"▶ Procesar":"✓ Listo"}</Btn>}
+              <Btn size="sm" variant="secondary" onClick={()=>setModal(p)}>👁 Ver</Btn>
+              <Btn size="sm" variant="secondary" onClick={()=>setForm(p)}>✏ Editar</Btn>
+              <Btn size="sm" variant="danger" onClick={()=>eliminar(p.id)}>🗑</Btn>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Modal detalle */}
+      {modal && <Modal title={`Pedido ${modal.id}`} onClose={()=>setModal(null)}>
+        <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+          <Row label="Cliente" val={modal.cliente}/>
+          <Row label="Teléfono" val={modal.telefono}/>
+          <Row label="Estado" val={<Badge status={modal.estado}/>}/>
+          <Row label="Fecha" val={`${modal.fecha} ${modal.hora}`}/>
+          {modal.despacho && <Row label="Despacho" val={modal.despacho}/>}
+          <div><div style={{color:G.muted,fontSize:"12px",marginBottom:"6px"}}>PRODUCTOS</div>
+            {modal.items.map((it,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${G.border}`,fontSize:"13px"}}>
+                <span>{it.prod} ×{it.cant}</span><span>{fmt(it.precio*it.cant)}</span>
+              </div>
+            ))}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontWeight:700}}>
+              <span>TOTAL</span><span style={{color:G.accent}}>{fmt(modal.total)}</span>
+            </div>
+          </div>
+          {modal.nota && <Row label="Nota" val={modal.nota}/>}
+          <div style={{marginTop:"8px",padding:"12px",background:G.bg,borderRadius:"8px",border:`1px solid ${G.border}`}}>
+            <div style={{fontSize:"12px",color:G.muted,marginBottom:"6px"}}>ENVIAR POR WHATSAPP</div>
+            <a href={`https://wa.me/${modal.telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${modal.cliente}! Tu pedido ${modal.id} está ${modal.estado==="listo"?"listo para recoger":"siendo preparado"}. Total: ${fmt(modal.total)}`)}`}
+               target="_blank" rel="noreferrer">
+              <Btn variant="primary">💬 Enviar mensaje WA</Btn>
+            </a>
+          </div>
+        </div>
+      </Modal>}
+
+      {/* Modal formulario */}
+      {form && <FormPedido pedido={form} onGuardar={guardarPedido} onCerrar={()=>setForm(null)}/>}
+    </div>
+  );
+}
+
+const Row = ({label,val}) => (
+  <div style={{display:"flex",gap:"12px",fontSize:"13px"}}>
+    <span style={{color:G.muted,minWidth:"90px",flexShrink:0}}>{label}</span>
+    <span>{val}</span>
+  </div>
+);
+
+function FormPedido({pedido,onGuardar,onCerrar}) {
+  const [d,setD] = useState({...pedido});
+  const set = (k,v) => setD(p=>({...p,[k]:v}));
+  const setItem = (i,k,v) => setD(p=>({...p,items:p.items.map((it,idx)=>idx===i?{...it,[k]:v}:it)}));
+  const addItem = () => setD(p=>({...p,items:[...p.items,{prod:"",cant:1,precio:0}]}));
+  const remItem = i => setD(p=>({...p,items:p.items.filter((_,idx)=>idx!==i)}));
+  const total = d.items.reduce((s,it)=>s+(it.cant*(it.precio||0)),0);
+
+  const guardar = () => {
+    if(!d.cliente||!d.telefono) return alert("Cliente y teléfono son obligatorios");
+    onGuardar({...d,total,hora:d.hora||new Date().toTimeString().slice(0,5)});
+  };
+
+  return (
+    <Modal title={d.id?"Editar pedido":"Nuevo pedido"} onClose={onCerrar} width={560}>
+      <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+          <div><label style={{fontSize:"12px",color:G.muted}}>Cliente *</label><br/><input value={d.cliente} onChange={e=>set("cliente",e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+          <div><label style={{fontSize:"12px",color:G.muted}}>Teléfono *</label><br/><input value={d.telefono} onChange={e=>set("telefono",e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+        </div>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Fecha despacho</label><br/><input type="date" value={d.despacho} onChange={e=>set("despacho",e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+            <label style={{fontSize:"12px",color:G.muted}}>PRODUCTOS</label>
+            <Btn size="sm" variant="secondary" onClick={addItem}>＋ Agregar</Btn>
+          </div>
+          {d.items.map((it,i)=>(
+            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 60px 90px 28px",gap:"6px",marginBottom:"6px"}}>
+              <input placeholder="Producto" value={it.prod} onChange={e=>setItem(i,"prod",e.target.value)}/>
+              <input type="number" placeholder="Cant" min="1" value={it.cant} onChange={e=>setItem(i,"cant",+e.target.value)}/>
+              <input type="number" placeholder="Precio" min="0" value={it.precio} onChange={e=>setItem(i,"precio",+e.target.value)}/>
+              <button onClick={()=>remItem(i)} style={{background:"none",border:`1px solid ${G.border}`,borderRadius:"5px",color:G.red,cursor:"pointer"}}>✕</button>
+            </div>
+          ))}
+          <div style={{textAlign:"right",fontSize:"13px",color:G.accent,fontWeight:700,marginTop:"4px"}}>Total: {fmt(total)}</div>
+        </div>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Nota</label><br/><textarea value={d.nota} onChange={e=>set("nota",e.target.value)} rows={2} style={{width:"100%",marginTop:"4px",resize:"vertical"}}/></div>
+        <div style={{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"4px"}}>
+          <Btn variant="secondary" onClick={onCerrar}>Cancelar</Btn>
+          <Btn onClick={guardar}>Guardar pedido</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── SECCIÓN INVENTARIO ─────────────────────────────────────────────────────
+function SeccionInventario({inventario,setInventario}) {
+  const [cat,setCat] = useState("Todos");
+  const [form,setForm] = useState(null);
+  const [filtro,setFiltro] = useState("");
+
+  const cats = ["Todos","Insumo","Producto"];
+  const filtered = inventario.filter(m=>(cat==="Todos"||m.categoria===cat)&&(!filtro||m.nombre.toLowerCase().includes(filtro.toLowerCase())));
+
+  const guardar = (d) => {
+    if(d.id&&inventario.find(m=>m.id===d.id)) setInventario(ms=>ms.map(m=>m.id===d.id?d:m));
+    else { const nid="M"+String(inventario.length+1).padStart(3,"0"); setInventario(ms=>[...ms,{...d,id:nid}]); }
+    setForm(null);
+  };
+  const eliminar = id=>setInventario(ms=>ms.filter(m=>m.id!==id));
+
+  const bajos = inventario.filter(m=>m.stock<=m.minimo);
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"20px",flexWrap:"wrap",gap:"10px"}}>
+        <div>
+          <h2 style={{fontSize:"20px",fontWeight:700}}>📦 Inventario</h2>
+          <p style={{color:G.muted,fontSize:"13px",marginTop:"2px"}}>{inventario.length} items • {bajos.length} con stock bajo</p>
+        </div>
+        <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+          <input placeholder="🔍 Buscar…" value={filtro} onChange={e=>setFiltro(e.target.value)} style={{width:"180px"}}/>
+          <Btn onClick={()=>setForm({nombre:"",categoria:"Insumo",stock:0,unidad:"kg",minimo:1,precio:0})}>＋ Agregar</Btn>
+          <Btn variant="secondary" onClick={()=>{ const rows=[["ID","Nombre","Categoría","Stock","Unidad","Mínimo","Precio"],...inventario.map(m=>[m.id,m.nombre,m.categoria,m.stock,m.unidad,m.minimo,m.precio])]; downloadCSV(rows.map(r=>r.join(",")).join("\n"),"inventario.csv"); }}>⬇ Exportar</Btn>
+        </div>
+      </div>
+
+      {bajos.length>0 && <div style={{background:"#ef444410",border:`1px solid ${G.red}40`,borderRadius:"8px",padding:"12px 16px",marginBottom:"16px",fontSize:"13px"}}>
+        ⚠️ <strong>Stock bajo:</strong> {bajos.map(m=>m.nombre).join(", ")}
+      </div>}
+
+      <div style={{display:"flex",gap:"6px",marginBottom:"16px"}}>
+        {cats.map(c=><button key={c} onClick={()=>setCat(c)} style={{padding:"6px 16px",borderRadius:"6px",border:`1px solid ${cat===c?G.accent:G.border}`,background:cat===c?G.accent+"20":G.card,color:cat===c?G.accent:G.muted,fontSize:"13px",cursor:"pointer"}}>{c}</button>)}
+      </div>
+
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:"13px"}}>
+          <thead>
+            <tr style={{borderBottom:`2px solid ${G.border}`,color:G.muted,textAlign:"left"}}>
+              {["ID","Nombre","Categoría","Stock","Mín.","Precio unit.",""].map(h=><th key={h} style={{padding:"8px 12px",fontWeight:500,fontSize:"11px",textTransform:"uppercase",letterSpacing:".5px"}}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(m=>{
+              const bajo = m.stock<=m.minimo;
+              return <tr key={m.id} style={{borderBottom:`1px solid ${G.border}`,background:bajo?"#ef444406":"transparent"}}>
+                <td style={{padding:"10px 12px",fontFamily:G.font,fontSize:"11px",color:G.muted}}>{m.id}</td>
+                <td style={{padding:"10px 12px",fontWeight:500}}>{m.nombre}{bajo&&<span style={{marginLeft:"8px",color:G.red,fontSize:"11px"}}>⚠ BAJO</span>}</td>
+                <td style={{padding:"10px 12px"}}><span style={{background:m.categoria==="Producto"?G.blue+"22":G.amber+"22",color:m.categoria==="Producto"?G.blue:G.amber,padding:"2px 8px",borderRadius:"4px",fontSize:"11px"}}>{m.categoria}</span></td>
+                <td style={{padding:"10px 12px",fontWeight:600,color:bajo?G.red:G.accent}}>{m.stock} {m.unidad}</td>
+                <td style={{padding:"10px 12px",color:G.muted}}>{m.minimo} {m.unidad}</td>
+                <td style={{padding:"10px 12px"}}>{fmt(m.precio)}</td>
+                <td style={{padding:"10px 12px"}}>
+                  <div style={{display:"flex",gap:"4px"}}>
+                    <Btn size="sm" variant="secondary" onClick={()=>setForm(m)}>✏</Btn>
+                    <Btn size="sm" variant="danger" onClick={()=>eliminar(m.id)}>🗑</Btn>
+                  </div>
+                </td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {form && <Modal title={form.id?"Editar item":"Nuevo item"} onClose={()=>setForm(null)}>
+        <FormInv item={form} onGuardar={guardar} onCerrar={()=>setForm(null)}/>
+      </Modal>}
+    </div>
+  );
+}
+
+function FormInv({item,onGuardar,onCerrar}) {
+  const [d,setD] = useState({...item});
+  const set=(k,v)=>setD(p=>({...p,[k]:v}));
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Nombre</label><br/><input value={d.nombre} onChange={e=>set("nombre",e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Categoría</label><br/>
+          <select value={d.categoria} onChange={e=>set("categoria",e.target.value)} style={{width:"100%",marginTop:"4px"}}>
+            <option>Insumo</option><option>Producto</option>
+          </select>
+        </div>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Stock actual</label><br/><input type="number" value={d.stock} onChange={e=>set("stock",+e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Unidad</label><br/><input value={d.unidad} onChange={e=>set("unidad",e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Stock mínimo</label><br/><input type="number" value={d.minimo} onChange={e=>set("minimo",+e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Precio unitario</label><br/><input type="number" value={d.precio} onChange={e=>set("precio",+e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+      </div>
+      <div style={{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"4px"}}>
+        <Btn variant="secondary" onClick={onCerrar}>Cancelar</Btn>
+        <Btn onClick={()=>onGuardar(d)}>Guardar</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ── SECCIÓN CALENDARIO ─────────────────────────────────────────────────────
+function SeccionCalendario({eventos,setEventos,pedidos}) {
+  const [mes,setMes] = useState(new Date(2026,3,1));
+  const [sel,setSel] = useState(null);
+  const [formEv,setFormEv] = useState(null);
+
+  const year=mes.getFullYear(), month=mes.getMonth();
+  const primerDia = new Date(year,month,1).getDay();
+  const diasMes = new Date(year,month+1,0).getDate();
+  const mesStr = mes.toLocaleDateString("es-CO",{month:"long",year:"numeric"});
+
+  const evPorDia = {};
+  eventos.forEach(e=>{ if(!evPorDia[e.fecha]) evPorDia[e.fecha]=[];  evPorDia[e.fecha].push(e); });
+
+  const dayKey = d => `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  const selEvs = sel ? (evPorDia[sel]||[]) : [];
+
+  const guardarEv = (ev) => {
+    if(ev.id&&eventos.find(e=>e.id===ev.id)) setEventos(es=>es.map(e=>e.id===ev.id?ev:e));
+    else setEventos(es=>[...es,{...ev,id:"E"+Date.now()}]);
+    setFormEv(null);
+  };
+
+  const days = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+  const tipoColor = {despacho:G.accent,produccion:G.amber,otro:G.blue};
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"20px",flexWrap:"wrap",gap:"10px"}}>
+        <h2 style={{fontSize:"20px",fontWeight:700}}>🗓 Calendario</h2>
+        <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
+          <Btn variant="secondary" size="sm" onClick={()=>setMes(new Date(year,month-1,1))}>‹</Btn>
+          <span style={{fontSize:"14px",fontWeight:600,minWidth:"160px",textAlign:"center",textTransform:"capitalize"}}>{mesStr}</span>
+          <Btn variant="secondary" size="sm" onClick={()=>setMes(new Date(year,month+1,1))}>›</Btn>
+          <Btn onClick={()=>setFormEv({titulo:"",fecha:today(),tipo:"despacho",pedidoId:null})}>＋ Evento</Btn>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:"16px"}}>
+        {/* Calendario */}
+        <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",overflow:"hidden"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",borderBottom:`1px solid ${G.border}`}}>
+            {days.map(d=><div key={d} style={{padding:"10px 0",textAlign:"center",fontSize:"11px",fontWeight:600,color:G.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{d}</div>)}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}}>
+            {Array(primerDia===0?6:primerDia-1).fill(null).map((_,i)=><div key={`e${i}`} style={{borderRight:`1px solid ${G.border}`,borderBottom:`1px solid ${G.border}`,minHeight:"80px"}}/>)}
+            {Array.from({length:diasMes},(_,i)=>{
+              const d=i+1, k=dayKey(d), evs=evPorDia[k]||[];
+              const isToday=k===today(), isSel=k===sel;
+              return (
+                <div key={d} onClick={()=>setSel(isSel?null:k)} style={{borderRight:`1px solid ${G.border}`,borderBottom:`1px solid ${G.border}`,minHeight:"80px",padding:"6px",cursor:"pointer",background:isSel?G.accent+"12":isToday?G.accent+"08":"transparent",transition:"background .15s"}}>
+                  <div style={{fontSize:"13px",fontWeight:isToday?700:400,color:isToday?G.accent:G.text,marginBottom:"4px"}}>{d}</div>
+                  {evs.slice(0,3).map(ev=>(
+                    <div key={ev.id} style={{fontSize:"10px",background:(tipoColor[ev.tipo]||G.muted)+"22",color:tipoColor[ev.tipo]||G.muted,borderRadius:"3px",padding:"1px 5px",marginBottom:"2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ev.titulo}</div>
+                  ))}
+                  {evs.length>3&&<div style={{fontSize:"10px",color:G.muted}}>+{evs.length-3} más</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Panel lateral */}
+        <div>
+          {sel ? (
+            <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",padding:"16px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
+                <span style={{fontWeight:600,fontSize:"14px"}}>{new Date(sel+"T12:00").toLocaleDateString("es-CO",{weekday:"long",day:"numeric",month:"long"})}</span>
+                <Btn size="sm" onClick={()=>setFormEv({titulo:"",fecha:sel,tipo:"despacho",pedidoId:null})}>＋</Btn>
+              </div>
+              {selEvs.length===0 && <p style={{color:G.muted,fontSize:"13px"}}>Sin eventos</p>}
+              {selEvs.map(ev=>(
+                <div key={ev.id} style={{background:G.bg,border:`1px solid ${G.border}`,borderRadius:"7px",padding:"10px",marginBottom:"8px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:"8px"}}>
+                    <div>
+                      <div style={{fontSize:"13px",fontWeight:500,marginBottom:"4px"}}>{ev.titulo}</div>
+                      <span style={{fontSize:"11px",background:(tipoColor[ev.tipo]||G.muted)+"22",color:tipoColor[ev.tipo]||G.muted,padding:"2px 7px",borderRadius:"3px"}}>{ev.tipo}</span>
+                      {ev.pedidoId&&<span style={{fontSize:"11px",color:G.muted,marginLeft:"6px"}}>{ev.pedidoId}</span>}
+                    </div>
+                    <Btn size="sm" variant="danger" onClick={()=>setEventos(es=>es.filter(e=>e.id!==ev.id))}>🗑</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",padding:"16px"}}>
+              <div style={{fontWeight:600,fontSize:"14px",marginBottom:"12px"}}>Próximos eventos</div>
+              {eventos.filter(e=>e.fecha>=today()).sort((a,b)=>a.fecha>b.fecha?1:-1).slice(0,8).map(ev=>(
+                <div key={ev.id} style={{display:"flex",gap:"8px",marginBottom:"10px",fontSize:"13px"}}>
+                  <span style={{color:tipoColor[ev.tipo]||G.muted,fontSize:"18px",lineHeight:1}}>●</span>
+                  <div>
+                    <div style={{fontWeight:500}}>{ev.titulo}</div>
+                    <div style={{color:G.muted,fontSize:"12px"}}>{new Date(ev.fecha+"T12:00").toLocaleDateString("es-CO",{weekday:"short",day:"numeric",month:"short"})}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Leyenda */}
+          <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",padding:"14px",marginTop:"10px"}}>
+            <div style={{fontSize:"11px",color:G.muted,marginBottom:"8px",fontWeight:600}}>LEYENDA</div>
+            {Object.entries(tipoColor).map(([t,c])=>(
+              <div key={t} style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"5px",fontSize:"12px"}}>
+                <span style={{width:10,height:10,borderRadius:"50%",background:c,display:"inline-block"}}></span>
+                <span style={{textTransform:"capitalize"}}>{t}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {formEv && <Modal title="Nuevo evento" onClose={()=>setFormEv(null)}>
+        <FormEvento ev={formEv} pedidos={pedidos} onGuardar={guardarEv} onCerrar={()=>setFormEv(null)}/>
+      </Modal>}
+    </div>
+  );
+}
+
+function FormEvento({ev,pedidos,onGuardar,onCerrar}) {
+  const [d,setD] = useState({...ev});
+  const set=(k,v)=>setD(p=>({...p,[k]:v}));
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+      <div><label style={{fontSize:"12px",color:G.muted}}>Título</label><br/><input value={d.titulo} onChange={e=>set("titulo",e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Fecha</label><br/><input type="date" value={d.fecha} onChange={e=>set("fecha",e.target.value)} style={{width:"100%",marginTop:"4px"}}/></div>
+        <div><label style={{fontSize:"12px",color:G.muted}}>Tipo</label><br/>
+          <select value={d.tipo} onChange={e=>set("tipo",e.target.value)} style={{width:"100%",marginTop:"4px"}}>
+            <option value="despacho">Despacho</option>
+            <option value="produccion">Producción</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+      </div>
+      <div><label style={{fontSize:"12px",color:G.muted}}>Pedido relacionado (opcional)</label><br/>
+        <select value={d.pedidoId||""} onChange={e=>set("pedidoId",e.target.value||null)} style={{width:"100%",marginTop:"4px"}}>
+          <option value="">— Ninguno —</option>
+          {pedidos.map(p=><option key={p.id} value={p.id}>{p.id} - {p.cliente}</option>)}
+        </select>
+      </div>
+      <div style={{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"4px"}}>
+        <Btn variant="secondary" onClick={onCerrar}>Cancelar</Btn>
+        <Btn onClick={()=>onGuardar(d)}>Guardar</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ── SECCIÓN WA SIMULADO ────────────────────────────────────────────────────
+function SeccionWhatsApp({onImportar}) {
+  const msgs = [
+    {from:"Valentina Torres",tel:"+57 300 123 4567",msg:"Hola! Quiero pedir 1 torta de chocolate y 2 cajas de cupcakes para mañana 🎂",hora:"09:10",parsed:{cliente:"Valentina Torres",telefono:"+57 300 123 4567",items:[{prod:"Torta de chocolate",cant:1,precio:85000},{prod:"Cupcakes x6",cant:2,precio:42000}],nota:"Para mañana",despacho:"2026-04-18",total:169000}},
+    {from:"Andrés Morales",tel:"+57 311 987 6543",msg:"Buenas! Me pueden preparar 4 panes artesanales para hoy en la tarde?",hora:"10:25",parsed:{cliente:"Andrés Morales",telefono:"+57 311 987 6543",items:[{prod:"Pan artesanal",cant:4,precio:12000}],nota:"Para hoy en la tarde",despacho:today(),total:48000}},
+    {from:"María García",tel:"+57 320 888 1234",msg:"Quiero 2 brownies y 1 galletas x12 por favor, para el viernes",hora:"11:50",parsed:{cliente:"María García",telefono:"+57 320 888 1234",items:[{prod:"Brownie",cant:2,precio:18000},{prod:"Galletas x12",cant:1,precio:35000}],nota:"Para el viernes",despacho:"2026-04-19",total:71000}},
+  ];
+  const [importados,setImportados] = useState({});
+
+  return (
+    <div>
+      <div style={{marginBottom:"20px"}}>
+        <h2 style={{fontSize:"20px",fontWeight:700}}>💬 Mensajes de WhatsApp</h2>
+        <p style={{color:G.muted,fontSize:"13px",marginTop:"2px"}}>Mensajes simulados detectados como pedidos. Impórtalos directamente.</p>
+      </div>
+      <div style={{background:"#075e5420",border:`1px solid #075e5460`,borderRadius:"10px",padding:"4px 16px 12px",marginBottom:"16px",fontSize:"12px",color:G.muted}}>
+        ℹ️ En producción, esta sección se conecta a la <strong style={{color:G.text}}>API de WhatsApp Business</strong> o a un webhook de <strong style={{color:G.text}}>Twilio/360dialog</strong> para recibir mensajes reales.
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+        {msgs.map((m,i)=>(
+          <div key={i} style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",padding:"16px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:"12px",flexWrap:"wrap"}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",gap:"10px",alignItems:"center",marginBottom:"6px"}}>
+                  <div style={{width:36,height:36,borderRadius:"50%",background:G.accent+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>👤</div>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:"14px"}}>{m.from}</div>
+                    <div style={{fontSize:"12px",color:G.muted}}>{m.tel} · {m.hora}</div>
+                  </div>
+                </div>
+                <div style={{background:"#25D36615",border:`1px solid ${G.accent}30`,borderRadius:"8px",padding:"10px 12px",fontSize:"13px",margin:"8px 0",fontStyle:"italic",color:G.text}}>
+                  "{m.msg}"
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:"6px",fontSize:"12px"}}>
+                  {m.parsed.items.map((it,j)=><span key={j} style={{background:G.bg,border:`1px solid ${G.border}`,borderRadius:"4px",padding:"3px 8px"}}>{it.prod} ×{it.cant} — {fmt(it.precio*it.cant)}</span>)}
+                  <span style={{color:G.accent,fontWeight:700,marginLeft:"auto"}}>Total: {fmt(m.parsed.total)}</span>
+                </div>
+              </div>
+              <div>
+                {importados[i] ? (
+                  <span style={{color:G.accent,fontSize:"12px",fontWeight:600}}>✓ Importado</span>
+                ) : (
+                  <Btn onClick={()=>{ onImportar(m.parsed); setImportados(p=>({...p,[i]:true})); }}>
+                    ＋ Importar pedido
+                  </Btn>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── DASHBOARD ──────────────────────────────────────────────────────────────
+function Dashboard({pedidos,inventario,eventos}) {
+  const totales = { nuevo:0,proceso:0,listo:0,ingresos:0 };
+  pedidos.forEach(p=>{ totales[p.estado]=(totales[p.estado]||0)+1; if(p.estado==="listo") totales.ingresos+=p.total; });
+  const hoy = eventos.filter(e=>e.fecha===today());
+
+  const Kpi = ({icon,label,val,color=G.text}) => (
+    <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",padding:"18px 20px"}}>
+      <div style={{fontSize:"24px",marginBottom:"6px"}}>{icon}</div>
+      <div style={{fontSize:"26px",fontWeight:700,color}}>{val}</div>
+      <div style={{fontSize:"12px",color:G.muted,marginTop:"2px"}}>{label}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 style={{fontSize:"20px",fontWeight:700,marginBottom:"20px"}}>📊 Dashboard</h2>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))",gap:"12px",marginBottom:"24px"}}>
+        <Kpi icon="🟢" label="Nuevos pedidos" val={totales.nuevo} color={G.accent}/>
+        <Kpi icon="🟡" label="En proceso" val={totales.proceso} color={G.amber}/>
+        <Kpi icon="✅" label="Listos" val={totales.listo} color={G.blue}/>
+        <Kpi icon="💰" label="Ingresos listos" val={fmt(totales.ingresos)} color={G.accent}/>
+        <Kpi icon="📦" label="Items inventario" val={inventario.length}/>
+        <Kpi icon="⚠️" label="Stock bajo" val={inventario.filter(m=>m.stock<=m.minimo).length} color={G.red}/>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
+        <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",padding:"16px"}}>
+          <div style={{fontWeight:600,marginBottom:"12px"}}>📅 Eventos de hoy</div>
+          {hoy.length===0 ? <p style={{color:G.muted,fontSize:"13px"}}>Sin eventos hoy</p> : hoy.map(e=>(
+            <div key={e.id} style={{display:"flex",gap:"8px",marginBottom:"8px",fontSize:"13px",alignItems:"center"}}>
+              <span style={{color:{despacho:G.accent,produccion:G.amber,otro:G.blue}[e.tipo]||G.muted}}>●</span>
+              <span>{e.titulo}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:"10px",padding:"16px"}}>
+          <div style={{fontWeight:600,marginBottom:"12px"}}>📦 Últimos pedidos</div>
+          {pedidos.slice(0,4).map(p=>(
+            <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",fontSize:"13px"}}>
+              <span>{p.cliente}</span>
+              <div style={{display:"flex",gap:"8px",alignItems:"center"}}><Badge status={p.estado}/><span style={{color:G.accent,fontWeight:600}}>{fmt(p.total)}</span></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── APP PRINCIPAL ──────────────────────────────────────────────────────────
+export default function App() {
+  const [nav,setNav] = useState("dashboard");
+  const [pedidos,setPedidos] = useState(INIT_PEDIDOS);
+  const [inventario,setInventario] = useState(INIT_INVENTARIO);
+  const [eventos,setEventos] = useState(INIT_EVENTOS);
+
+  const importarDesdWA = (parsed) => {
+    const newId = "P" + String(pedidos.length+1).padStart(3,"0");
+    const nuevo = {...parsed, id:newId, estado:"nuevo", fecha:today(), hora:new Date().toTimeString().slice(0,5)};
+    setPedidos(ps=>[nuevo,...ps]);
+    if(nuevo.despacho) setEventos(evs=>[...evs,{id:"E"+Date.now(),titulo:`Despacho ${newId} - ${nuevo.cliente}`,fecha:nuevo.despacho,tipo:"despacho",pedidoId:newId}]);
+  };
+
+  const links = [
+    ["dashboard","📊","Dashboard"],
+    ["whatsapp","💬","WhatsApp"],
+    ["pedidos","📦","Pedidos"],
+    ["inventario","🏪","Inventario"],
+    ["calendario","🗓","Calendario"],
+  ];
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{display:"flex",minHeight:"100vh"}}>
+        {/* Sidebar */}
+        <div style={{width:"200px",background:G.panel,borderRight:`1px solid ${G.border}`,display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh"}}>
+          <div style={{padding:"20px 16px 16px",borderBottom:`1px solid ${G.border}`}}>
+            <div style={{fontSize:"18px",fontWeight:700,color:G.accent}}>🧾 PedidosApp</div>
+            <div style={{fontSize:"11px",color:G.muted,marginTop:"2px",fontFamily:G.font}}>v1.0 · WhatsApp Orders</div>
+          </div>
+          <nav style={{padding:"10px 8px",flex:1}}>
+            {links.map(([key,icon,label])=>(
+              <button key={key} onClick={()=>setNav(key)} style={{
+                display:"flex",alignItems:"center",gap:"10px",width:"100%",
+                padding:"10px 12px",borderRadius:"7px",border:"none",textAlign:"left",
+                background:nav===key?G.accent+"18":"transparent",
+                color:nav===key?G.accent:G.muted,
+                fontSize:"13px",fontWeight:nav===key?600:400,
+                marginBottom:"2px",cursor:"pointer",transition:"all .15s",
+              }}><span style={{fontSize:"16px"}}>{icon}</span>{label}</button>
+            ))}
+          </nav>
+          <div style={{padding:"12px 16px",borderTop:`1px solid ${G.border}`,fontSize:"11px",color:G.muted}}>
+            <div>{pedidos.filter(p=>p.estado==="nuevo").length} pedidos nuevos</div>
+            <div style={{marginTop:"3px"}}>{inventario.filter(m=>m.stock<=m.minimo).length} items bajo stock</div>
+          </div>
+        </div>
+
+        {/* Main */}
+        <main style={{flex:1,padding:"28px",overflowY:"auto",maxWidth:"1100px"}}>
+          {nav==="dashboard"   && <Dashboard pedidos={pedidos} inventario={inventario} eventos={eventos}/>}
+          {nav==="whatsapp"    && <SeccionWhatsApp onImportar={importarDesdWA}/>}
+          {nav==="pedidos"     && <SeccionPedidos pedidos={pedidos} setPedidos={setPedidos} setEventos={setEventos}/>}
+          {nav==="inventario"  && <SeccionInventario inventario={inventario} setInventario={setInventario}/>}
+          {nav==="calendario"  && <SeccionCalendario eventos={eventos} setEventos={setEventos} pedidos={pedidos}/>}
+        </main>
+      </div>
+    </>
+  );
+}
