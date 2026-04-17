@@ -61,11 +61,6 @@ const INIT_INVENTARIO = [
 ];
 
 const INIT_EVENTOS = [
-  { id:"E001", titulo:"Despacho P002 - Andrés",   fecha:"2026-04-17", tipo:"despacho", pedidoId:"P002" },
-  { id:"E002", titulo:"Despacho P003 - Laura",    fecha:"2026-04-17", tipo:"despacho", pedidoId:"P003" },
-  { id:"E003", titulo:"Despacho P001 - Valentina",fecha:"2026-04-18", tipo:"despacho", pedidoId:"P001" },
-  { id:"E004", titulo:"Preparar torta de frutas", fecha:"2026-04-18", tipo:"produccion", pedidoId:null },
-  { id:"E005", titulo:"Despacho P004 - Carlos",   fecha:"2026-04-19", tipo:"despacho", pedidoId:"P004" },
 ];
 
 // ── Utils ──────────────────────────────────────────────────────────────────
